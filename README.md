@@ -1,6 +1,14 @@
 Google API Batch Requests
 =========================
 
+Make batched HTTP requests using the standard `googleapis` library.
+
+Each "sub-request" has its own callback, so you can decide to batch
+requests without refactoring much code.
+
+Example
+-------
+
 ```
 const Google = require( 'googleapis' )
 const Batch = require( 'googleapis-batch' )
@@ -29,7 +37,7 @@ gmail.users.messages.list( {
 	console.log( "NORMAL", err, body )
 } )
 
-// To batch requests together, pass a batch object as the auth parameter...
+// To batch requests together, pass a batch object as the auth parameter ...
 gmail.users.messages.list( {
 	userId: 'me',
 	maxResults: 1,
@@ -49,6 +57,7 @@ gmail.users.messages.list( {
 	console.log( "ONE", err, body )
 } )
 
+// ... you can have up to 100 requests in one batch ...
 gmail.users.messages.list( {
 	userId: 'me',
 	maxResults: 2,
@@ -60,12 +69,8 @@ gmail.users.messages.list( {
 // ... and then call batch.exec( callback )
 batch.exec( ( err, body, response ) => {
 	// body and response are from the whole batch request
+
+	// This callback is mostly useful to
+	// catch errors coming from the batch request
+	// as a whole.
 } )
-
-// OR
-
-// ... and then call batch.exec() without a callback,
-// but then you can't trap errors with the batch request
-// as a whole.
-batch.exec()
-```
