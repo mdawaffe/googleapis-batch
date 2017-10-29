@@ -9,7 +9,7 @@ requests without refactoring much code.
 Example
 -------
 
-```
+```js
 const Google = require( 'googleapis' )
 const Batch = require( 'googleapis-batch' )
 
@@ -21,8 +21,6 @@ const client = new Google.auth.OAuth2(
 
 // Or however you obtain credentials
 client.setCredentials( ... )
-
-const batch = new Batch( client )
 
 const gmail = Google.gmail( {
 	version: 'v1'
@@ -37,7 +35,11 @@ gmail.users.messages.list( {
 	console.log( "NORMAL", err, body )
 } )
 
+
 // To batch requests together, pass a batch object as the auth parameter ...
+
+const batch = new Batch( client )
+
 gmail.users.messages.list( {
 	userId: 'me',
 	maxResults: 1,
