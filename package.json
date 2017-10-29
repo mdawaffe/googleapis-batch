@@ -1,0 +1,18 @@
+{
+  "name": "googleapis-batch",
+  "version": "0.0.1",
+  "description": "Batch requests for googleapis",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "author": "",
+  "license": "GPL-2.0+",
+  "dependencies": {
+    "google-auth-library": "~0.10.0",
+    "http-headers": "^3.0.1"
+  },
+  "devDependencies": {
+    "googleapis": "^22.2.0"
+  }
+}
