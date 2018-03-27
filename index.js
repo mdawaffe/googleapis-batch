@@ -7,10 +7,13 @@ const GOOGLE_API_BASE = 'https://www.googleapis.com'
 
 const BOUNDARY_REGEXP = /^multipart\/mixed;\s*boundary=(?:"([^"]+)"|(.+)$)/i
 
+const { URL } = 'URL' in global ? global : require( 'url' )
+
 class Batch {
 	constructor( auth ) {
 		this.auth = auth
 
+		this.apiPath = ''
 		this.requests = []
 		this.callbacks = new Map;
 
@@ -55,6 +58,15 @@ ${request.body ? request.body : '' }`
 		options.id = options.id || `request-${this.requests.length}`
 		this.callbacks.set( options.id, callback )
 
+		const { pathname } = new URL( options.url )
+		const apiPath = pathname.split( '/' ).slice( 0, 3 ).join( '/' )
+
+		if ( ! this.apiPath ) {
+			this.apiPath = apiPath
+		} else if ( this.apiPath !== apiPath ) {
+			throw new Error( 'Requests must all go to the same API. Use separate Batch instances for separate APIs.' )
+		}
+
 		this.requests.push( DefaultTransporter.prototype.configure( options ) )
 	}
 
@@ -63,7 +75,7 @@ ${request.body ? request.body : '' }`
 		const boundary = `batch_${random}`
 
 		return this.auth.request( {
-			url: `${GOOGLE_API_BASE}/batch`,
+			url: `${GOOGLE_API_BASE}/batch${this.apiPath}`,
 			method: 'POST',
 			headers: {
 				'Content-Type': `multipart/mixed; boundary=${boundary}`
