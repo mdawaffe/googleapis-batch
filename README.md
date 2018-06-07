@@ -10,11 +10,11 @@ Example
 -------
 
 ```js
-const Google = require( 'googleapis' )
+const {google} = require( 'googleapis' )
 const Batch = require( 'googleapis-batch' )
 
 // Create the OAuth2 client
-const client = new Google.auth.OAuth2(
+const client = new google.auth.OAuth2(
 	process.env.GOOGLE_CLIENT_ID,
 	process.env.GOOGLE_CLIENT_SECRET
 )
@@ -22,7 +22,7 @@ const client = new Google.auth.OAuth2(
 // Or however you obtain credentials
 client.setCredentials( ... )
 
-const gmail = Google.gmail( {
+const gmail = google.gmail( {
 	version: 'v1'
 } )
 
@@ -31,8 +31,8 @@ gmail.users.messages.list( {
 	userId: 'me',
 	maxResults: 1,
 	auth: client,
-}, ( err, body, response ) => {
-	console.log( "NORMAL", err, body )
+}, ( err, response ) => {
+	console.log( "NORMAL", err, response.data )
 } )
 
 
@@ -44,19 +44,17 @@ gmail.users.messages.list( {
 	userId: 'me',
 	maxResults: 1,
 	auth: batch,
-}, ( err, body, response ) => {
-	// body is the body of just this one sub-request
+}, ( err, response ) => {
+	// response is the "response" of just this one sub-request
 	// in the larger batch request
-
-	// response is the response object for just this
-	// one sub-request:
 	// {
-	//   version: { major: 1, minor: 1 },
-	//   statusCode: 200,
-	//   statusMessage: 'OK',
-	//   headers: { name: value, ... }
+	//   status: 200,
+	//   statusText: 'OK',
+	//   headers: { name: value, ... },
+	//   data: ...,
+	//   ...
 	// }
-	console.log( "ONE", err, body )
+	console.log( "ONE", err, response )
 } )
 
 // ... you can have up to 100 requests in one batch ...
@@ -64,13 +62,13 @@ gmail.users.messages.list( {
 	userId: 'me',
 	maxResults: 2,
 	auth: batch,
-}, ( err, body, response ) => {
-	console.log( "TWO", err, body )
+}, ( err, response ) => {
+	console.log( "TWO", err, response )
 } )
 
 // ... and then call batch.exec( callback )
-batch.exec( ( err, body, response ) => {
-	// body and response are from the whole batch request
+batch.exec( ( err, response ) => {
+	// response is from the whole batch request
 
 	// This callback is mostly useful to
 	// catch errors coming from the batch request
