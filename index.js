@@ -1,7 +1,10 @@
 const httpHeaders = require( 'http-headers' )
 
-const DefaultTransporter = require( 'google-auth-library/lib/transporters.js' )
-const Querystring = require( 'request/lib/querystring' ).Querystring
+const DefaultTransporter = require( 'google-auth-library' ).DefaultTransporter
+
+const buildURL = require( 'axios/lib/helpers/buildURL' )
+const transformData = require( 'axios/lib/core/transformData' )
+const settle = require( 'axios/lib/core/settle' )
 
 const GOOGLE_API_BASE = 'https://www.googleapis.com'
 
@@ -14,9 +17,10 @@ class Batch {
 		this.auth = auth
 
 		this.apiPath = ''
-		this.requests = []
-		this.callbacks = new Map;
+		this.requestCount = 0
+		this.requests = {}
 
+		this.transporter = new DefaultTransporter
 		this.request = this.request.bind( this )
 	}
 
@@ -25,40 +29,54 @@ class Batch {
 
 		let url = request.uri || request.url
 
-		if ( request.qs ) {
-			let qs = new Querystring
-			qs.init( request )
-			url += '?' + qs.stringify( request.qs )
+		if ( request.params ) {
+			url = buildURL( url, request.params, request.paramsSerializer )
 		}
 
-		if ( request.json ) {
-			request.headers['Content-Type'] = 'application/json'
-			if ( 'object' === typeof request.json ) {
-				request.body = JSON.stringify( request.json )
-			}
-		}
+		let data = transformData(
+			request.data,
+			request.headers,
+			request.transformRequest
+		)
 
 		let path = 0 === url.indexOf( GOOGLE_API_BASE + '/' )
 			? url.slice( GOOGLE_API_BASE.length )
 			: ( () => { throw new Error( 'Invalid URL' ) } )()
 
-		let body = `${request.method} ${path}
-${Object.entries( request.headers ).map( ( [ name, value ] ) => `${name}: ${value}` ).join( '\n' )}
+		let body = [
+			`${request.method} ${path}`,
+			`${Object.entries( request.headers ).map( ( [ name, value ] ) => `${name}: ${value}` ).join( '\r\n' )}`,
+		]
 
-${request.body ? request.body : '' }`
-
-		return {
-			'Content-Type': 'application/http',
-			'Content-ID': request.id,
-			body,
+		if ( data ) {
+			body.push( '', data )
 		}
+
+		return [
+			'Content-Type: application/http',
+			`Content-ID: ${request.requestId}`,
+			'',
+		].concat( body ).join( '\r\n' )
 	}
 
-	request( options, callback ) {
-		options.id = options.id || `request-${this.requests.length}`
-		this.callbacks.set( options.id, callback )
+	adapter( config ) {
+		return new Promise( ( resolve, reject ) => {
+			if ( config.requestId in this.requests ) {
+				return reject( new Error( 'googleapis-batch: Duplicate Request ID' ) )
+			}
 
-		const { pathname } = new URL( options.url )
+			this.requests[config.requestId] = {
+				config,
+				resolve,
+				reject,
+			}
+		} )
+	}
+
+	request( config, callback ) {
+		config.requestId = config.requestId || `request-${this.requestCount++}`
+
+		const { pathname } = new URL( config.url )
 		const apiPath = pathname.split( '/' ).slice( 0, 3 ).join( '/' )
 
 		if ( ! this.apiPath ) {
@@ -67,71 +85,108 @@ ${request.body ? request.body : '' }`
 			throw new Error( 'Requests must all go to the same API. Use separate Batch instances for separate APIs.' )
 		}
 
-		this.requests.push( DefaultTransporter.prototype.configure( options ) )
+		config.adapter = this.adapter.bind( this )
+
+		return this.transporter.request( config, callback )
 	}
 
 	exec( callback ) {
-		const random = ( Math.random() * 10000000000000000 + 1000000000000000 ).toString().slice( 0, 16 )
-		const boundary = `batch_${random}`
+		// When making requests, Axios starts by setting up a
+		// Promise chain starting with Promise.resolve()
+		// https://github.com/axios/axios/blob/0b3db5d87a60a1ad8b0dce9669dbc10483ec33da/lib/core/Axios.js#L39-L53
+		// Since this.exec() is almost certainly called on the
+		// same tick as this.request(), we need to also start
+		// this.exec() with a Promise.resolve() so that it gets
+		// appended to the microtask queue. Otherwise, this.exec()
+		// will fire before the Promises in this.adapter()
+		// are instantiated/added to this.requests()
+		return Promise.resolve().then( () => {
+			const random = ( Math.random() * 10000000000000000 + 1000000000000000 ).toString().slice( 0, 16 )
+			const boundary = `batch_${random}`
+			const encapsulation = `\r\n\r\n--${boundary}\r\n`
 
-		return this.auth.request( {
-			url: `${GOOGLE_API_BASE}/batch${this.apiPath}`,
-			method: 'POST',
-			headers: {
-				'Content-Type': `multipart/mixed; boundary=${boundary}`
-			},
-			multipart: {
-				chunked: false,
-				data: this.requests.map( Batch.build )
-			}
-		}, ( err, body, response ) => this.response( err, body, response, callback ) )
+			return this.auth.request( {
+				url: `${GOOGLE_API_BASE}/batch${this.apiPath}`,
+				method: 'post',
+				headers: {
+					'Content-Type': `multipart/mixed; boundary=${boundary}`
+				},
+				data: [ '' ].concat( Object.values( this.requests ).map( request => Batch.build( request.config ) ) ).join( encapsulation ) + `\r\n\r\n--${boundary}--`,
+				responseType: 'text',
+			} )
+				.then( response => {
+					return this.response( response, callback )
+				} )
+				.catch( err => {
+					if ( callback ) {
+						return callback( err )
+					}
+
+					throw err
+				} )
+		} )
 	}
 
-	response( err, multiBody, multiResponse, multiCallback ) {
-		if ( ! multiCallback ) {
-			multiCallback = err => err ? console.error( err ) : null
-		}
+	response( multiResponse, multiCallback ) {
+		const throwCallback = err => {
+			if ( multiCallback ) {
+				return multiCallback( err )
+			}
 
-		if ( err ) {
-			return multiCallback( err )
+			throw err
 		}
 
 		const { headers: { 'content-type': ContentType } } = multiResponse
 
 		let boundary = BOUNDARY_REGEXP.exec( ContentType )
 		if ( ! boundary ) {
-			return multiCallback( new Error( 'No multipart boundary found' ) )
+			return throwCallback( new Error( 'No multipart boundary found' ) )
 		}
 
 		boundary = boundary[1] || boundary[2]
 
-		const parts = `\r\n${multiBody}`.split( `\r\n--${boundary}--` )[0].split( `\r\n--${boundary}\r\n` ).slice( 1 )
+		const parts = `\r\n${multiResponse.data}`.split( `\r\n--${boundary}--` )[0].split( `\r\n--${boundary}\r\n` ).slice( 1 )
 
 		for ( let part of parts ) {
 			let [ meta, headers, body ] = part.split( '\r\n\r\n' )
 
 			const metaHeaders = httpHeaders( meta, true )
-
-			// ( err, body, response )
-			let callback = metaHeaders['content-id'] && this.callbacks.get( metaHeaders['content-id'].replace( 'response-', '' ) )
-
-			if ( ! callback ) {
-				throw new Error( 'Unknown Batch Response Item' )
+			const requestId = metaHeaders['content-id'].replace( 'response-', '' )
+			const request = this.requests[requestId]
+			if ( ! request ) {
+				return throwCallback( new Error( 'Unknown Batch Response Item' ) )
 			}
 
-			// ( err, response, body )
-			callback = DefaultTransporter.prototype.wrapCallback_( callback )
+			const { config, resolve, reject } = request
 
 			if ( 'application/http' !== metaHeaders['content-type'] ) {
-				return callback( new Error( 'Unknown Batch Response Item Format' ) )
+				reject( new Error( 'Unknown Batch Response Item Format' ) )
+				break
 			}
 
-			const responseItem = httpHeaders( headers )
+			const partHeaders = httpHeaders( headers )
 
-			callback( null, responseItem, body )
+			const response = {
+				status: partHeaders.statusCode,
+				statusText: partHeaders.statusMessage,
+				headers: partHeaders.headers,
+				config,
+				request: 'batch',
+				data: body,
+			}
+
+			settle(
+				resolve,
+				reject,
+				response
+			)
 		}
 
-		multiCallback( null, multiBody, multiResponse )
+		if ( multiCallback ) {
+			multiCallback( null, multiResponse )
+		} else {
+			return multiResponse
+		}
 	}
 }
 
