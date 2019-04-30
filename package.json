@@ -1,6 +1,6 @@
 {
   "name": "googleapis-batch",
-  "version": "0.0.1",
+  "version": "0.0.2",
   "description": "Batch requests for googleapis",
   "main": "index.js",
   "scripts": {
@@ -9,7 +9,7 @@
   "author": "",
   "license": "GPL-2.0+",
   "dependencies": {
-    "google-auth-library": "^1.6.0",
+    "google-auth-library": "^1.6.1",
     "http-headers": "^3.0.2"
   },
   "devDependencies": {
