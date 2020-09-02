@@ -13,6 +13,6 @@
     "http-headers": "^3.0.2"
   },
   "devDependencies": {
-    "googleapis": "^32.0.0"
+    "googleapis": "^39.1.0"
   }
 }
